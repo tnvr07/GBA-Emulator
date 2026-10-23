@@ -38,9 +38,9 @@ static void RunRomDiagnostic(string path, int frames, bool pressStart)
     Console.WriteLine($"ROM: {emulator.Title} ({rom.Length:N0} bytes)");
     for (int frame = 1; frame <= frames; frame++)
     {
-        if (pressStart && frame == 121)
+        if (pressStart && frame == 40)
             emulator.SetButton(GameBoyButton.Start, true);
-        if (pressStart && frame == 124)
+        if (pressStart && frame == 80)
             emulator.SetButton(GameBoyButton.Start, false);
         emulator.AdvanceFrame();
         if (frame % 10 != 0 && frame != frames)
