@@ -18,6 +18,7 @@ internal sealed class GbaCpu
     private uint _irqStackPointer = 0x03007FA0;
     private bool _inCallback;
     private bool _biosWaiting;
+    private bool _biosWaitForEnabledInterrupt;
     private ushort _biosWaitMask;
     public uint ProgramCounter => _registers[15];
     public bool ThumbMode => (_status & 0x20) != 0;
@@ -38,8 +39,14 @@ internal sealed class GbaCpu
             return 4;
         }
 
-        if (_biosWaiting && (_memory.PendingInterrupts & _biosWaitMask) != 0)
+        ushort waitFlags = _biosWaitForEnabledInterrupt
+            ? (ushort)(_memory.PendingInterrupts & _memory.EnabledInterrupts)
+            : _memory.PendingInterrupts;
+        if (_biosWaiting && (waitFlags & _biosWaitMask) != 0)
+        {
             _biosWaiting = false;
+            _biosWaitForEnabledInterrupt = false;
+        }
 
         ushort pendingInterrupts = (ushort)(_memory.EnabledInterrupts & _memory.PendingInterrupts);
         if (_memory.InterruptsEnabled && pendingInterrupts != 0 && !_inCallback)
@@ -591,7 +598,7 @@ internal sealed class GbaCpu
             else
             {
                 uint target = _registers[14] + ((uint)(instruction & 0x7FF) << 1);
-                _registers[14] = (next - 2) | 1;
+                _registers[14] = next | 1;
                 _registers[15] = target & ~1u;
             }
         }
@@ -777,10 +784,10 @@ internal sealed class GbaCpu
         switch (number)
         {
             case 0x02:
-                BeginBiosWait(0x3FFF, false);
+                BeginBiosWait(0x3FFF, false, true);
                 break;
             case 0x03:
-                BeginBiosWait(0x3FFF, false);
+                BeginBiosWait(0x3FFF, false, true);
                 break;
             case 0x04:
                 BeginBiosWait((ushort)_registers[1], _registers[0] != 0);
@@ -830,16 +837,19 @@ internal sealed class GbaCpu
         }
     }
 
-    private void BeginBiosWait(ushort mask, bool clearPending)
+    private void BeginBiosWait(ushort mask, bool clearPending, bool waitForEnabledInterrupt = false)
     {
         if (mask == 0)
             mask = 1;
         if (clearPending)
             _memory.ClearInterruptFlags(mask);
-        else if ((_memory.PendingInterrupts & mask) != 0)
+        else if (((waitForEnabledInterrupt
+            ? (ushort)(_memory.PendingInterrupts & _memory.EnabledInterrupts)
+            : _memory.PendingInterrupts) & mask) != 0)
             return;
 
         _biosWaitMask = mask;
+        _biosWaitForEnabledInterrupt = waitForEnabledInterrupt;
         _biosWaiting = true;
     }
 

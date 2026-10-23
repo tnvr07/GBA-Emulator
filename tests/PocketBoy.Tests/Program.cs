@@ -19,8 +19,10 @@ if (args.Length > 0)
 Run("ARM instructions store results in work RAM", TestArmExecution);
 Run("BIOS division service returns signed quotient", TestDivideService);
 Run("VBlankIntrWait resumes on the next VBlank", TestVBlankIntrWait);
+Run("Halt ignores disabled pending interrupts", TestHaltWait);
 Run("VBlank invokes the registered IRQ callback", TestIrqCallback);
 Run("Thumb instructions store results in work RAM", TestThumbExecution);
+Run("Thumb branch-with-link returns to the next instruction", TestThumbBranchAndLink);
 Run("Mode 3 renders 15-bit color", TestMode3);
 Run("Mode 4 uses its palette and page", TestMode4);
 Run("Mode 0 renders a tiled background", TestMode0);
@@ -226,6 +228,27 @@ static void TestVBlankIntrWait()
     AssertEqual(1u, memory.Read32(0x03007FF8), "BIOS VBlank wait flags");
 }
 
+static void TestHaltWait()
+{
+    byte[] rom = CreateRom();
+    Write32(rom, 0, 0xEA000000);
+    Write32(rom, 8, 0xEF000002);
+    Write32(rom, 12, 0xE3A0002A);
+    GbaMemory memory = new(rom);
+    GbaCpu cpu = new(memory);
+
+    cpu.Step();
+    cpu.Step();
+    memory.Write16(0x04000004, 0x0010);
+    memory.Tick(960);
+    cpu.Step();
+    AssertEqual(0u, cpu.ReadRegister(0), "Halt remains asleep for disabled HBlank");
+
+    memory.Write16(0x04000200, 2);
+    cpu.Step();
+    AssertEqual(42u, cpu.ReadRegister(0), "Halt resumes for enabled HBlank");
+}
+
 static void TestThumbExecution()
 {
     byte[] rom = CreateRom();
@@ -245,6 +268,32 @@ static void TestThumbExecution()
         cpu.Step();
 
     AssertEqual(42u, memory.Read32(0x02000000), "Thumb result");
+}
+
+static void TestThumbBranchAndLink()
+{
+    byte[] rom = CreateRom();
+    Write32(rom, 0, 0xEA000000);
+    Write32(rom, 8, 0xE59F0008);
+    Write32(rom, 12, 0xE12FFF10);
+    Write32(rom, 24, 0x08000021);
+    Write16(rom, 32, 0x2005);
+    Write16(rom, 34, 0xF000);
+    Write16(rom, 36, 0xF807);
+    Write16(rom, 38, 0x1C01);
+    Write16(rom, 40, 0x4801);
+    Write16(rom, 42, 0x6001);
+    Write16(rom, 44, 0xE7FE);
+    Write32(rom, 48, 0x02000000);
+    Write16(rom, 52, 0x202A);
+    Write16(rom, 54, 0x4770);
+    GbaMemory memory = new(rom);
+    GbaCpu cpu = new(memory);
+
+    for (int i = 0; i < 11; i++)
+        cpu.Step();
+
+    AssertEqual(42u, memory.Read32(0x02000000), "Thumb branch-with-link result");
 }
 
 static void TestMode3()
