@@ -165,6 +165,8 @@ internal sealed class GbaMemory
             _io[0x004] = vblank ? (byte)(_io[0x004] | 1) : (byte)(_io[0x004] & ~1);
             if (vblank && !wasVblank && (_io[0x004] & 8) != 0)
                 RequestInterrupt(0);
+            if (vblank && !wasVblank)
+                TriggerDma(1);
             UpdateVCountMatch();
             SetHBlank(false);
         }
@@ -215,8 +217,10 @@ internal sealed class GbaMemory
         }
         if (offset is >= 0x0BA and < 0x0E0 && (offset - 0x0B0) % 12 == 11)
         {
-            if ((value & 0x80) != 0)
-                ExecuteDma((offset - 0x0B0) / 12);
+            int channel = (offset - 0x0B0) / 12;
+            ushort control = (ushort)(_io[offset - 1] | (_io[offset] << 8));
+            if ((control & 0x8000) != 0 && ((control >> 12) & 3) == 0)
+                ExecuteDma(channel);
         }
     }
 
@@ -226,6 +230,8 @@ internal sealed class GbaMemory
         _io[0x004] = enabled ? (byte)(_io[0x004] | 2) : (byte)(_io[0x004] & ~2);
         if (enabled && !wasEnabled && (_io[0x004] & 0x10) != 0)
             RequestInterrupt(1);
+        if (enabled && !wasEnabled)
+            TriggerDma(2);
     }
 
     private void UpdateVCountMatch()
@@ -274,6 +280,8 @@ internal sealed class GbaMemory
                     overflowCount++;
                     if ((control & 0x40) != 0)
                         RequestInterrupt(3 + timer);
+                    if (timer is 0 or 1)
+                        TriggerDma(3, timer);
                 }
                 _io[offset] = (byte)count;
                 _io[offset + 1] = (byte)(count >> 8);
@@ -292,17 +300,39 @@ internal sealed class GbaMemory
         Write32(0x03007FF8, biosFlags);
     }
 
+    private void TriggerDma(int timing, int timer = -1)
+    {
+        for (int channel = 0; channel < 4; channel++)
+        {
+            int offset = 0x0B0 + channel * 12;
+            uint destination = (uint)(_io[offset + 4] | (_io[offset + 5] << 8)
+                | (_io[offset + 6] << 16) | (_io[offset + 7] << 24));
+            ushort control = (ushort)(_io[offset + 10] | (_io[offset + 11] << 8));
+            if ((control & 0x8000) == 0 || ((control >> 12) & 3) != timing)
+                continue;
+            if (timing == 3 && (channel is not (1 or 2)
+                || destination is not (0x040000A0 or 0x040000A4)))
+                continue;
+            if (timing == 3 && timer >= 0)
+            {
+                int timerSelectBit = destination == 0x040000A0 ? 10 : 14;
+                if (((_io[0x082] >> timerSelectBit) & 1) != timer)
+                    continue;
+            }
+            ExecuteDma(channel);
+        }
+    }
+
     private void ExecuteDma(int channel)
     {
         int offset = 0x0B0 + channel * 12;
         uint source = (uint)(_io[offset] | (_io[offset + 1] << 8)
             | (_io[offset + 2] << 16) | (_io[offset + 3] << 24));
-        uint destination = (uint)(_io[offset + 4] | (_io[offset + 5] << 8)
+        uint initialDestination = (uint)(_io[offset + 4] | (_io[offset + 5] << 8)
             | (_io[offset + 6] << 16) | (_io[offset + 7] << 24));
+        uint destination = initialDestination;
         int count = _io[offset + 8] | (_io[offset + 9] << 8);
         ushort control = (ushort)(_io[offset + 10] | (_io[offset + 11] << 8));
-        if ((control & 0x3000) != 0)
-            return;
         if (count == 0)
             count = channel == 3 ? 0x10000 : 0x4000;
 
@@ -310,6 +340,7 @@ internal sealed class GbaMemory
         int increment = word ? 4 : 2;
         source &= word ? ~3u : ~1u;
         destination &= word ? ~3u : ~1u;
+        int sourceMode = (control >> 7) & 3;
         int destinationMode = (control >> 5) & 3;
         for (int i = 0; i < count; i++)
         {
@@ -318,15 +349,32 @@ internal sealed class GbaMemory
             else
                 Write16(destination, Read16(source));
 
-            source += (control & 0x0800) != 0 ? unchecked((uint)-increment) : (uint)increment;
-            if (destinationMode == 0)
+            if (sourceMode == 0)
+                source += (uint)increment;
+            else if (sourceMode == 1)
+                source += unchecked((uint)-increment);
+            if (destinationMode == 0 || destinationMode == 3)
                 destination += (uint)increment;
             else if (destinationMode == 1)
                 destination += unchecked((uint)-increment);
         }
 
-        _io[offset + 10] &= 0x7F;
-        _io[offset + 11] &= 0x7F;
+        WriteIo32(offset, source);
+        WriteIo32(offset + 4, destinationMode == 3 ? initialDestination : destination);
+        int timing = (control >> 12) & 3;
+        bool repeat = timing != 0 && (control & 0x0200) != 0;
+        if (!repeat)
+            _io[offset + 11] &= 0x7F;
+        if ((control & 0x4000) != 0)
+            RequestInterrupt(8 + channel);
+    }
+
+    private void WriteIo32(int offset, uint value)
+    {
+        _io[offset] = (byte)value;
+        _io[offset + 1] = (byte)(value >> 8);
+        _io[offset + 2] = (byte)(value >> 16);
+        _io[offset + 3] = (byte)(value >> 24);
     }
 
     private static int NormalizeVramOffset(uint offset)

@@ -32,6 +32,7 @@ Run("Game Boy Advance button bits are active-low", TestButtons);
 Run("Display timing updates vblank, hblank, and IRQ flags", TestDisplayTiming);
 Run("Game Boy Advance timers reload and raise IRQ flags", TestTimer);
 Run("Cascaded timers increment on overflow and raise IRQ flags", TestCascadedTimer);
+Run("VBlank DMA transfers data when the display enters VBlank", TestVBlankDma);
 
 static void Run(string name, Action test)
 {
@@ -51,13 +52,17 @@ static void RunRomDiagnostic(string path, int frames, GameBoyButton? button)
     for (int frame = 1; frame <= frames; frame++)
     {
         if (button.HasValue && frame == 40)
+        {
             memory.SetButton(button.Value, true);
+            if (button == GameBoyButton.Start)
+                memory.SetButton(GameBoyButton.A, true);
+        }
         if (button.HasValue && frame == 80)
+        {
             memory.SetButton(button.Value, false);
-        if (button == GameBoyButton.Start && frame == 100)
-            memory.SetButton(GameBoyButton.A, true);
-        if (button == GameBoyButton.Start && frame == 140)
-            memory.SetButton(GameBoyButton.A, false);
+            if (button == GameBoyButton.Start)
+                memory.SetButton(GameBoyButton.A, false);
+        }
         int frameCycles = 0;
         while (frameCycles < 280_896)
         {
@@ -445,6 +450,23 @@ static void TestCascadedTimer()
 
     AssertEqual((ushort)0xFFFF, memory.Read16(0x04000104), "Cascaded timer reload");
     AssertEqual(true, (memory.Read16(0x04000202) & 0x10) != 0, "Cascaded timer IRQ");
+}
+
+static void TestVBlankDma()
+{
+    byte[] rom = CreateRom();
+    Write32(rom, 0x100, 0x12345678);
+    GbaMemory memory = new(rom);
+    memory.Write32(0x040000B0, 0x08000100);
+    memory.Write32(0x040000B4, 0x02000000);
+    memory.Write16(0x040000B8, 1);
+    memory.Write16(0x040000BA, 0x9400);
+
+    AssertEqual(0u, memory.Read32(0x02000000), "VBlank DMA waits for VBlank");
+    memory.Tick(1232 * 160);
+
+    AssertEqual(0x12345678u, memory.Read32(0x02000000), "VBlank DMA transfer");
+    AssertEqual(false, (memory.Read16(0x040000BA) & 0x8000) != 0, "One-shot VBlank DMA disables");
 }
 
 static byte[] CreateRom()
