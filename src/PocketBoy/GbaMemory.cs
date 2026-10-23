@@ -47,6 +47,7 @@ internal sealed class GbaMemory
 
     public byte Read8(uint address)
     {
+        address &= 0x0FFFFFFF;
         if (address < 0x00004000)
             return 0;
         if (address is >= 0x02000000 and < 0x02040000)
@@ -83,6 +84,7 @@ internal sealed class GbaMemory
 
     public void Write8(uint address, byte value)
     {
+        address &= 0x0FFFFFFF;
         if (address is >= 0x02000000 and < 0x02040000)
             _workRam[(address - 0x02000000) & 0x3FFFF] = value;
         else if (address is >= 0x03000000 and < 0x03008000)
