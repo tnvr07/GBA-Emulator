@@ -52,6 +52,10 @@ static void RunRomDiagnostic(string path, int frames, GameBoyButton? button)
             memory.SetButton(button.Value, true);
         if (button.HasValue && frame == 80)
             memory.SetButton(button.Value, false);
+        if (button == GameBoyButton.Start && frame == 100)
+            memory.SetButton(GameBoyButton.A, true);
+        if (button == GameBoyButton.Start && frame == 140)
+            memory.SetButton(GameBoyButton.A, false);
         int frameCycles = 0;
         while (frameCycles < 280_896)
         {
