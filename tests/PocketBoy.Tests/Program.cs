@@ -189,6 +189,7 @@ static void TestVBlankIntrWait()
     cpu.Step();
     cpu.Step();
     AssertEqual(42u, cpu.ReadRegister(0), "CPU resumes after VBlank");
+    AssertEqual(1u, memory.Read32(0x03007FF8), "BIOS VBlank wait flags");
 }
 
 static void TestThumbExecution()

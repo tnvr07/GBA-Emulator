@@ -175,6 +175,8 @@ internal sealed class GbaMemory
     public void ClearInterruptFlags(ushort mask)
     {
         Write16(0x04000202, mask);
+        uint waitFlags = Read32(0x03007FF8) & ~(uint)mask;
+        Write32(0x03007FF8, waitFlags);
     }
 
     private byte ReadIo8(int offset) => _io[offset];
@@ -276,6 +278,8 @@ internal sealed class GbaMemory
         flags |= (ushort)(1 << bit);
         _io[0x202] = (byte)flags;
         _io[0x203] = (byte)(flags >> 8);
+        uint biosFlags = Read32(0x03007FF8) | (1u << bit);
+        Write32(0x03007FF8, biosFlags);
     }
 
     private void ExecuteDma(int channel)
