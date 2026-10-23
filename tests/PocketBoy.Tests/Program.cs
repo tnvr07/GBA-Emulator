@@ -5,10 +5,14 @@ using System.Runtime.InteropServices;
 
 if (args.Length > 0)
 {
+    GameBoyButton? button = args.Length > 2
+        && Enum.TryParse(args[2], true, out GameBoyButton selectedButton)
+        ? selectedButton
+        : null;
     RunRomDiagnostic(
         args[0],
         args.Length > 1 ? int.Parse(args[1]) : 60,
-        args.Length > 2 && args[2].Equals("start", StringComparison.OrdinalIgnoreCase));
+        button);
     return;
 }
 
@@ -31,21 +35,50 @@ static void Run(string name, Action test)
     Console.WriteLine($"PASS {name}");
 }
 
-static void RunRomDiagnostic(string path, int frames, bool pressStart)
+static void RunRomDiagnostic(string path, int frames, GameBoyButton? button)
 {
     byte[] rom = File.ReadAllBytes(path);
-    var emulator = new GameBoyAdvance(rom);
-    Console.WriteLine($"ROM: {emulator.Title} ({rom.Length:N0} bytes)");
+    var memory = new GbaMemory(rom);
+    var cpu = new GbaCpu(memory);
+    var ppu = new GbaPpu(memory);
+    var instructionTrace = new Queue<string>();
+    bool invalidProgramCounterReported = false;
+    Console.WriteLine($"ROM: {memory.Title} ({rom.Length:N0} bytes)");
     for (int frame = 1; frame <= frames; frame++)
     {
-        if (pressStart && frame == 40)
-            emulator.SetButton(GameBoyButton.Start, true);
-        if (pressStart && frame == 80)
-            emulator.SetButton(GameBoyButton.Start, false);
-        emulator.AdvanceFrame();
+        if (button.HasValue && frame == 40)
+            memory.SetButton(button.Value, true);
+        if (button.HasValue && frame == 80)
+            memory.SetButton(button.Value, false);
+        int frameCycles = 0;
+        while (frameCycles < 280_896)
+        {
+            uint address = cpu.ProgramCounter;
+            uint instruction = cpu.ThumbMode ? memory.Read16(address) : memory.Read32(address);
+            int cycles = cpu.Step();
+            memory.Tick(cycles);
+            frameCycles += cycles;
+            instructionTrace.Enqueue($"PC={address:X8} OP={instruction:X8} "
+                + $"R0-3={cpu.ReadRegister(0):X8}/{cpu.ReadRegister(1):X8}/"
+                + $"{cpu.ReadRegister(2):X8}/{cpu.ReadRegister(3):X8}");
+            if (instructionTrace.Count > 24)
+                instructionTrace.Dequeue();
+            uint nextAddress = cpu.ProgramCounter;
+            bool validAddress = nextAddress is >= 0x02000000 and < 0x02040000
+                or >= 0x03000000 and < 0x03008000
+                or >= 0x08000000 and < 0x0E000000;
+            if (!validAddress && !invalidProgramCounterReported)
+            {
+                invalidProgramCounterReported = true;
+                Console.WriteLine($"First execution outside mapped ROM/RAM: PC=0x{nextAddress:X8}");
+                foreach (string trace in instructionTrace)
+                    Console.WriteLine($"  {trace}");
+            }
+        }
+        ppu.RenderFrame();
         if (frame % 10 != 0 && frame != frames)
             continue;
-        ReadOnlySpan<byte> pixels = emulator.Ppu.Pixels;
+        ReadOnlySpan<byte> pixels = ppu.Pixels;
         var colors = new HashSet<ushort>();
         int nonzeroPixels = 0;
         for (int i = 0; i < pixels.Length; i += 2)
@@ -55,31 +88,32 @@ static void RunRomDiagnostic(string path, int frames, bool pressStart)
             if (color != 0)
                 nonzeroPixels++;
         }
-        Console.WriteLine($"Frame {frame}: PC=0x{emulator.ProgramCounter:X8} "
-            + $"mode={(emulator.DisplayControl & 7)} display=0x{emulator.DisplayControl:X4} "
-            + $"thumb={emulator.ThumbMode} op=0x{emulator.ReadMemory32(emulator.ProgramCounter):X8} "
-            + $"R0-3={emulator.ReadRegister(0):X8}/{emulator.ReadRegister(1):X8}/"
-            + $"{emulator.ReadRegister(2):X8}/{emulator.ReadRegister(3):X8} "
-            + $"dispstat={emulator.ReadIo16(0x04000004):X4} "
-            + $"IE/IF={emulator.ReadIo16(0x04000200):X4}/{emulator.ReadIo16(0x04000202):X4} "
-            + $"IME={emulator.ReadIo16(0x04000208):X4} "
-            + $"IRQHandler={emulator.ReadMemory32(0x03007FFC):X8} "
-            + $"IRQWait={emulator.ReadMemory32(0x03007FF8):X8} "
+        Console.WriteLine($"Frame {frame}: PC=0x{cpu.ProgramCounter:X8} "
+            + $"mode={(memory.DisplayControl & 7)} display=0x{memory.DisplayControl:X4} "
+            + $"thumb={cpu.ThumbMode} op=0x{memory.Read32(cpu.ProgramCounter):X8} "
+            + $"R0-3={cpu.ReadRegister(0):X8}/{cpu.ReadRegister(1):X8}/"
+            + $"{cpu.ReadRegister(2):X8}/{cpu.ReadRegister(3):X8} "
+            + $"KEYINPUT={memory.Read16(0x04000130):X4} "
+            + $"dispstat={memory.Read16(0x04000004):X4} "
+            + $"IE/IF={memory.Read16(0x04000200):X4}/{memory.Read16(0x04000202):X4} "
+            + $"IME={memory.Read16(0x04000208):X4} "
+            + $"IRQHandler={memory.Read32(0x03007FFC):X8} "
+            + $"IRQWait={memory.Read32(0x03007FF8):X8} "
             + $"colors={colors.Count} nonzero={nonzeroPixels}");
         if (frame == 40)
         {
-            uint start = emulator.ProgramCounter - 16;
+            uint start = cpu.ProgramCounter - 16;
             for (uint address = start; address < start + 48; address += 4)
-                Console.WriteLine($"  {address:X8}: {emulator.ReadMemory32(address):X8}");
+                Console.WriteLine($"  {address:X8}: {memory.Read32(address):X8}");
             for (uint address = 0x03003114; address < 0x03003174; address += 4)
-                Console.WriteLine($"  {address:X8}: {emulator.ReadMemory32(address):X8}");
+                Console.WriteLine($"  {address:X8}: {memory.Read32(address):X8}");
         }
     }
 
     string imagePath = Path.Combine(Path.GetTempPath(), "pocketboy-gba-frame.png");
     using var bitmap = new Bitmap(GbaPpu.Width, GbaPpu.Height, PixelFormat.Format32bppArgb);
     var argb = new int[GbaPpu.Width * GbaPpu.Height];
-    ReadOnlySpan<byte> finalPixels = emulator.Ppu.Pixels;
+    ReadOnlySpan<byte> finalPixels = ppu.Pixels;
     for (int i = 0; i < argb.Length; i++)
     {
         int color = finalPixels[i * 2] | (finalPixels[i * 2 + 1] << 8);
@@ -277,9 +311,26 @@ static void TestButtons()
 {
     GbaMemory memory = new(CreateRom());
     AssertEqual((ushort)0x03FF, memory.Read16(0x04000130), "Released buttons");
-    memory.SetButton(GameBoyButton.A, true);
-    memory.SetButton(GameBoyButton.L, true);
-    AssertEqual((ushort)0x02EF, memory.Read16(0x04000130), "Pressed buttons");
+    (GameBoyButton Button, ushort Value)[] expectedValues =
+    [
+        (GameBoyButton.A, 0x03FE),
+        (GameBoyButton.B, 0x03FD),
+        (GameBoyButton.Select, 0x03FB),
+        (GameBoyButton.Start, 0x03F7),
+        (GameBoyButton.Right, 0x03EF),
+        (GameBoyButton.Left, 0x03DF),
+        (GameBoyButton.Up, 0x03BF),
+        (GameBoyButton.Down, 0x037F),
+        (GameBoyButton.R, 0x02FF),
+        (GameBoyButton.L, 0x01FF)
+    ];
+    foreach ((GameBoyButton button, ushort expectedValue) in expectedValues)
+    {
+        memory.SetButton(button, true);
+        AssertEqual(expectedValue, memory.Read16(0x04000130), $"{button} pressed");
+        memory.SetButton(button, false);
+        AssertEqual((ushort)0x03FF, memory.Read16(0x04000130), $"{button} released");
+    }
 }
 
 static void TestDisplayTiming()

@@ -119,16 +119,16 @@ internal sealed class GbaMemory
     {
         int index = button switch
         {
-            GameBoyButton.Right => 0,
-            GameBoyButton.Left => 1,
-            GameBoyButton.Up => 2,
-            GameBoyButton.Down => 3,
-            GameBoyButton.A => 4,
-            GameBoyButton.B => 5,
-            GameBoyButton.Select => 6,
-            GameBoyButton.Start => 7,
-            GameBoyButton.L => 8,
-            GameBoyButton.R => 9,
+            GameBoyButton.A => 0,
+            GameBoyButton.B => 1,
+            GameBoyButton.Select => 2,
+            GameBoyButton.Start => 3,
+            GameBoyButton.Right => 4,
+            GameBoyButton.Left => 5,
+            GameBoyButton.Up => 6,
+            GameBoyButton.Down => 7,
+            GameBoyButton.R => 8,
+            GameBoyButton.L => 9,
             _ => -1
         };
         if (index < 0)

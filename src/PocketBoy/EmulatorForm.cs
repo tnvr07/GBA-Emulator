@@ -86,6 +86,20 @@ internal sealed class EmulatorForm : Form
             Shown += (_, _) => LoadRom(args[0]);
     }
 
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (TryHandleGameKey(keyData & Keys.KeyCode))
+            return true;
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    protected override bool ProcessDialogKey(Keys keyData)
+    {
+        if (TryHandleGameKey(keyData & Keys.KeyCode))
+            return true;
+        return base.ProcessDialogKey(keyData);
+    }
+
     private void OpenRom()
     {
         using var dialog = new OpenFileDialog
@@ -201,6 +215,16 @@ internal sealed class EmulatorForm : Form
             e.Handled = true;
             e.SuppressKeyPress = true;
         }
+    }
+
+    private bool TryHandleGameKey(Keys key)
+    {
+        if ((_gameBoy is null && _gameBoyAdvance is null) || !TryMapKey(key, out GameBoyButton button))
+            return false;
+
+        _gameBoy?.Joypad.SetButton(button, true);
+        _gameBoyAdvance?.SetButton(button, true);
+        return true;
     }
 
     private static bool TryMapKey(Keys key, out GameBoyButton button)
