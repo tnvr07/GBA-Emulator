@@ -184,6 +184,7 @@ static void TestVBlankIntrWait()
     cpu.Step();
     AssertEqual(0u, cpu.ReadRegister(0), "CPU stays asleep before VBlank");
 
+    memory.Write16(0x04000004, 0x0008);
     memory.Tick(1232 * 160);
     cpu.Step();
     cpu.Step();
