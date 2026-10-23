@@ -1,0 +1,257 @@
+using System.Diagnostics;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+
+namespace PocketBoy;
+
+internal sealed class EmulatorForm : Form
+{
+    private readonly GameScreen _screen = new();
+    private readonly Label _status = new();
+    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 16 };
+    private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private GameBoy? _gameBoy;
+    private double _cycleBudget;
+    private bool _paused;
+
+    public EmulatorForm()
+    {
+        Text = "PocketBoy";
+        MinimumSize = new Size(640, 530);
+        ClientSize = new Size(800, 680);
+        BackColor = Color.FromArgb(22, 27, 35);
+        ForeColor = Color.FromArgb(233, 237, 242);
+        KeyPreview = true;
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            Padding = new Padding(24, 18, 24, 18),
+            BackColor = BackColor
+        };
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
+        Controls.Add(layout);
+
+        var header = new Panel { Dock = DockStyle.Fill };
+        var brand = new Label
+        {
+            Text = "POCKETBOY",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 18, FontStyle.Bold),
+            ForeColor = Color.FromArgb(150, 205, 170),
+            Location = new Point(0, 5)
+        };
+        var openRom = new Button
+        {
+            Text = "Open ROM",
+            AutoSize = true,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Color.FromArgb(57, 78, 68),
+            ForeColor = Color.White,
+            Font = new Font("Segoe UI", 10, FontStyle.Bold),
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
+        };
+        openRom.FlatAppearance.BorderSize = 0;
+        openRom.Location = new Point(Width - openRom.Width - 100, 8);
+        openRom.Click += (_, _) => OpenRom();
+        header.Resize += (_, _) => openRom.Location = new Point(header.ClientSize.Width - openRom.Width, 8);
+        header.Controls.Add(brand);
+        header.Controls.Add(openRom);
+
+        _screen.Dock = DockStyle.Fill;
+        layout.Controls.Add(header, 0, 0);
+        layout.Controls.Add(_screen, 0, 1);
+        _status.Text = "Open a .gb or .gbc ROM to start.";
+        _status.Dock = DockStyle.Fill;
+        _status.TextAlign = ContentAlignment.MiddleLeft;
+        _status.ForeColor = Color.FromArgb(165, 174, 187);
+        _status.Font = new Font("Segoe UI", 9);
+        layout.Controls.Add(_status, 0, 2);
+
+        _timer.Tick += OnTimerTick;
+        _timer.Start();
+        KeyDown += OnKeyDown;
+        KeyUp += OnKeyUp;
+        FormClosed += (_, _) =>
+        {
+            _timer.Stop();
+            _screen.Dispose();
+        };
+    }
+
+    private void OpenRom()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = "Open Game Boy ROM",
+            Filter = "Game Boy ROMs (*.gb;*.gbc)|*.gb;*.gbc|All files (*.*)|*.*",
+            CheckFileExists = true
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        try
+        {
+            GameBoy candidate = new(File.ReadAllBytes(dialog.FileName));
+            _gameBoy = candidate;
+            _cycleBudget = 0;
+            _paused = false;
+            _clock.Restart();
+            _status.Text = $"{candidate.Title}  |  Arrows: move   Z: A   X: B   Enter: Start   Backspace: Select   Esc: pause";
+            _screen.Invalidate();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or InvalidDataException or NotSupportedException)
+        {
+            MessageBox.Show(this, exception.Message, "Unable to open ROM", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void OnTimerTick(object? sender, EventArgs e)
+    {
+        if (_gameBoy is null || _paused)
+        {
+            _clock.Restart();
+            return;
+        }
+
+        double elapsed = _clock.Elapsed.TotalSeconds;
+        _clock.Restart();
+        _cycleBudget = Math.Min(_cycleBudget + elapsed * 4_194_304, 456 * 154 * 3);
+        int frames = 0;
+        while (_cycleBudget >= 456 * 154 && frames < 3)
+        {
+            _gameBoy.AdvanceFrame();
+            _cycleBudget -= 456 * 154;
+            frames++;
+        }
+        if (frames > 0)
+            _screen.SetPixels(_gameBoy.Ppu.Pixels);
+    }
+
+    private void OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyCode == Keys.Escape && _gameBoy is not null)
+        {
+            _paused = !_paused;
+            _status.Text = _paused ? "Paused  |  Press Esc to resume" : $"{_gameBoy.Title}  |  Arrows: move   Z: A   X: B   Enter: Start   Backspace: Select   Esc: pause";
+            _clock.Restart();
+            e.Handled = true;
+            return;
+        }
+
+        if (TryMapKey(e.KeyCode, out GameBoyButton button) && _gameBoy is not null)
+        {
+            _gameBoy.Joypad.SetButton(button, true);
+            e.Handled = true;
+        }
+    }
+
+    private void OnKeyUp(object? sender, KeyEventArgs e)
+    {
+        if (TryMapKey(e.KeyCode, out GameBoyButton button) && _gameBoy is not null)
+        {
+            _gameBoy.Joypad.SetButton(button, false);
+            e.Handled = true;
+        }
+    }
+
+    private static bool TryMapKey(Keys key, out GameBoyButton button)
+    {
+        button = key switch
+        {
+            Keys.Right or Keys.D => GameBoyButton.Right,
+            Keys.Left or Keys.A => GameBoyButton.Left,
+            Keys.Up or Keys.W => GameBoyButton.Up,
+            Keys.Down or Keys.S => GameBoyButton.Down,
+            Keys.Z => GameBoyButton.A,
+            Keys.X => GameBoyButton.B,
+            Keys.Back => GameBoyButton.Select,
+            Keys.Enter => GameBoyButton.Start,
+            _ => (GameBoyButton)(-1)
+        };
+        return (int)button >= 0;
+    }
+}
+
+internal sealed class GameScreen : Control
+{
+    private static readonly Color[] Colors =
+    [
+        Color.FromArgb(224, 248, 208),
+        Color.FromArgb(136, 192, 112),
+        Color.FromArgb(52, 104, 86),
+        Color.FromArgb(8, 24, 32)
+    ];
+    private readonly Bitmap _bitmap = new(Ppu.Width, Ppu.Height, PixelFormat.Format32bppArgb);
+    private readonly int[] _argb = new int[Ppu.Width * Ppu.Height];
+    private bool _hasFrame;
+
+    public GameScreen()
+    {
+        DoubleBuffered = true;
+        BackColor = Color.FromArgb(12, 15, 20);
+        SetStyle(ControlStyles.ResizeRedraw, true);
+    }
+
+    public void SetPixels(byte[] pixels)
+    {
+        for (int i = 0; i < pixels.Length; i++)
+        {
+            byte shade = pixels[i];
+            _argb[i] = Colors[shade].ToArgb();
+        }
+
+        BitmapData data = _bitmap.LockBits(
+            new Rectangle(0, 0, Ppu.Width, Ppu.Height),
+            ImageLockMode.WriteOnly,
+            PixelFormat.Format32bppArgb);
+        try
+        {
+            Marshal.Copy(_argb, 0, data.Scan0, _argb.Length);
+        }
+        finally
+        {
+            _bitmap.UnlockBits(data);
+        }
+        _hasFrame = true;
+        Invalidate();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        if (!_hasFrame)
+        {
+            using var textBrush = new SolidBrush(Color.FromArgb(165, 174, 187));
+            using var titleFont = new Font("Segoe UI", 15, FontStyle.Bold);
+            using var hintFont = new Font("Segoe UI", 10);
+            string title = "Your Game Boy, ready.";
+            string hint = "Load a legally obtained .gb or .gbc ROM to play.";
+            SizeF titleSize = e.Graphics.MeasureString(title, titleFont);
+            SizeF hintSize = e.Graphics.MeasureString(hint, hintFont);
+            float centerY = ClientSize.Height / 2f;
+            e.Graphics.DrawString(title, titleFont, textBrush, (ClientSize.Width - titleSize.Width) / 2, centerY - 32);
+            e.Graphics.DrawString(hint, hintFont, textBrush, (ClientSize.Width - hintSize.Width) / 2, centerY + 6);
+            return;
+        }
+
+        e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+        e.Graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+        int scale = Math.Max(1, Math.Min(ClientSize.Width / Ppu.Width, ClientSize.Height / Ppu.Height));
+        int width = Ppu.Width * scale;
+        int height = Ppu.Height * scale;
+        e.Graphics.DrawImage(_bitmap, (ClientSize.Width - width) / 2, (ClientSize.Height - height) / 2, width, height);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _bitmap.Dispose();
+        base.Dispose(disposing);
+    }
+}
