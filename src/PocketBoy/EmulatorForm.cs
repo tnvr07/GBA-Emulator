@@ -127,6 +127,7 @@ internal sealed class EmulatorForm : Form
             _clock.Restart();
             _status.Text = $"{title}  |  Arrows: move   Z: A   X: B   Q/E: L/R   Enter: Start   Backspace: Select   Esc: pause";
             Text = $"{title} - PocketBoy";
+            _screen.Focus();
             _screen.ClearFrame();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
@@ -178,6 +179,7 @@ internal sealed class EmulatorForm : Form
             _status.Text = _paused ? "Paused  |  Press Esc to resume" : $"{title}  |  Arrows: move   Z: A   X: B   Q/E: L/R   Enter: Start   Backspace: Select   Esc: pause";
             _clock.Restart();
             e.Handled = true;
+            e.SuppressKeyPress = true;
             return;
         }
 
@@ -186,6 +188,7 @@ internal sealed class EmulatorForm : Form
             _gameBoy?.Joypad.SetButton(button, true);
             _gameBoyAdvance?.SetButton(button, true);
             e.Handled = true;
+            e.SuppressKeyPress = true;
         }
     }
 
@@ -196,6 +199,7 @@ internal sealed class EmulatorForm : Form
             _gameBoy?.Joypad.SetButton(button, false);
             _gameBoyAdvance?.SetButton(button, false);
             e.Handled = true;
+            e.SuppressKeyPress = true;
         }
     }
 
@@ -237,6 +241,7 @@ internal sealed class GameScreen : Control
     public GameScreen()
     {
         DoubleBuffered = true;
+        TabStop = true;
         BackColor = Color.FromArgb(12, 15, 20);
         SetStyle(ControlStyles.ResizeRedraw, true);
     }
