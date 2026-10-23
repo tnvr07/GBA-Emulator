@@ -5,10 +5,14 @@ using System.Runtime.InteropServices;
 
 if (args.Length > 0)
 {
+    GameBoyButton? button = args.Length > 2
+        && Enum.TryParse(args[2], true, out GameBoyButton selectedButton)
+        ? selectedButton
+        : null;
     RunRomDiagnostic(
         args[0],
         args.Length > 1 ? int.Parse(args[1]) : 60,
-        args.Length > 2 && args[2].Equals("start", StringComparison.OrdinalIgnoreCase));
+        button);
     return;
 }
 
@@ -18,6 +22,7 @@ Run("BIOS division service returns signed quotient", TestDivideService);
 Run("VBlankIntrWait resumes on the next VBlank", TestVBlankIntrWait);
 Run("Halt ignores disabled pending interrupts", TestHaltWait);
 Run("VBlank invokes the registered IRQ callback", TestIrqCallback);
+Run("IRQ callbacks return through the BIOS address space", TestIrqCallbackBiosReturn);
 Run("Thumb instructions store results in work RAM", TestThumbExecution);
 Run("Thumb branch-with-link returns to the next instruction", TestThumbBranchAndLink);
 Run("Mode 3 renders 15-bit color", TestMode3);
@@ -25,6 +30,7 @@ Run("Mode 4 uses its palette and page", TestMode4);
 Run("Mode 0 renders a tiled background", TestMode0);
 Run("Mode 1 renders an affine background", TestMode1);
 Run("Game Boy Advance button bits are active-low", TestButtons);
+Run("Game Boy Advance memory mirrors the 28-bit address bus", TestAddressBusMirroring);
 Run("Display timing updates vblank, hblank, and IRQ flags", TestDisplayTiming);
 Run("Game Boy Advance timers reload and raise IRQ flags", TestTimer);
 Run("Cascaded timers increment on overflow and raise IRQ flags", TestCascadedTimer);
@@ -36,17 +42,25 @@ static void Run(string name, Action test)
     Console.WriteLine($"PASS {name}");
 }
 
-static void RunRomDiagnostic(string path, int frames, bool pressStart)
+static void RunRomDiagnostic(string path, int frames, GameBoyButton? button)
 {
     byte[] rom = File.ReadAllBytes(path);
     var emulator = new GameBoyAdvance(rom);
     Console.WriteLine($"ROM: {emulator.Title} ({rom.Length:N0} bytes)");
     for (int frame = 1; frame <= frames; frame++)
     {
-        if (pressStart && frame == 40)
-            emulator.SetButton(GameBoyButton.Start, true);
-        if (pressStart && frame == 80)
-            emulator.SetButton(GameBoyButton.Start, false);
+        if (button.HasValue && frame == 40)
+        {
+            emulator.SetButton(button.Value, true);
+            if (button == GameBoyButton.Start)
+                emulator.SetButton(GameBoyButton.A, true);
+        }
+        if (button.HasValue && frame == 80)
+        {
+            emulator.SetButton(button.Value, false);
+            if (button == GameBoyButton.Start)
+                emulator.SetButton(GameBoyButton.A, false);
+        }
         emulator.AdvanceFrame();
         if (frame % 10 != 0 && frame != frames)
             continue;
@@ -176,6 +190,28 @@ static void TestIrqCallback()
 
     AssertEqual(1u, memory.Read32(0x03001000), "VBlank callback count");
     AssertEqual((ushort)0, memory.PendingInterrupts, "Acknowledged VBlank interrupt");
+}
+
+static void TestIrqCallbackBiosReturn()
+{
+    byte[] rom = CreateRom();
+    Write32(rom, 0x100, 0xE3A00020);
+    Write32(rom, 0x104, 0xE1A0F000);
+    GbaMemory memory = new(rom);
+    GbaCpu cpu = new(memory);
+    memory.Write32(0x03007FFC, 0x08000100);
+    memory.Write16(0x04000200, 1);
+    memory.Write16(0x04000208, 1);
+    memory.Write16(0x04000004, 8);
+    memory.Tick(1232 * 160);
+
+    cpu.Step();
+    cpu.Step();
+    cpu.Step();
+    cpu.Step();
+
+    AssertEqual(0x08000000u, cpu.ProgramCounter, "IRQ resumes interrupted code");
+    AssertEqual((ushort)0, memory.PendingInterrupts, "BIOS return clears serviced interrupt");
 }
 
 static void TestVBlankIntrWait()
@@ -351,6 +387,14 @@ static void TestButtons()
         memory.SetButton(button, false);
         AssertEqual((ushort)0x03FF, memory.Read16(0x04000130), $"{button} released");
     }
+}
+
+static void TestAddressBusMirroring()
+{
+    GbaMemory memory = new(CreateRom());
+    memory.Write32(0x03000000, 0x12345678);
+
+    AssertEqual(0x12345678u, memory.Read32(0x83000000), "Mirrored IWRAM address");
 }
 
 static void TestDisplayTiming()
