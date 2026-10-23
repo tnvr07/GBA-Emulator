@@ -49,5 +49,7 @@ internal enum GameBoyButton
     A,
     B,
     Select,
-    Start
+    Start,
+    L,
+    R
 }

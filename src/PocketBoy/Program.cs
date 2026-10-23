@@ -3,9 +3,9 @@ namespace PocketBoy;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
-        Application.Run(new EmulatorForm());
+        Application.Run(new EmulatorForm(args));
     }
 }
