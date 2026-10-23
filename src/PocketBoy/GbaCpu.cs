@@ -17,6 +17,8 @@ internal sealed class GbaCpu
     private uint _interruptedLr;
     private uint _irqStackPointer = 0x03007FA0;
     private bool _inCallback;
+    private bool _biosWaiting;
+    private ushort _biosWaitMask;
     public uint ProgramCounter => _registers[15];
     public bool ThumbMode => (_status & 0x20) != 0;
     public uint ReadRegister(int index) => _registers[index];
@@ -36,12 +38,18 @@ internal sealed class GbaCpu
             return 4;
         }
 
+        if (_biosWaiting && (_memory.PendingInterrupts & _biosWaitMask) != 0)
+            _biosWaiting = false;
+
         ushort pendingInterrupts = (ushort)(_memory.EnabledInterrupts & _memory.PendingInterrupts);
         if (_memory.InterruptsEnabled && pendingInterrupts != 0 && !_inCallback)
         {
             EnterInterruptCallback();
             return 4;
         }
+
+        if (_biosWaiting)
+            return 4;
 
         uint address = _registers[15];
         if ((_status & 0x20) != 0)
@@ -768,6 +776,18 @@ internal sealed class GbaCpu
     {
         switch (number)
         {
+            case 0x02:
+                BeginBiosWait(0x3FFF, false);
+                break;
+            case 0x03:
+                BeginBiosWait(0x3FFF, false);
+                break;
+            case 0x04:
+                BeginBiosWait((ushort)_registers[1], _registers[0] != 0);
+                break;
+            case 0x05:
+                BeginBiosWait(1, true);
+                break;
             case 0x00:
                 _registers[13] = 0x03007F00;
                 _registers[15] = 0x08000000;
@@ -775,11 +795,6 @@ internal sealed class GbaCpu
                 break;
             case 0x01:
                 ResetMemoryRegions(_registers[0]);
-                break;
-            case 0x02:
-            case 0x03:
-            case 0x04:
-            case 0x05:
                 break;
             case 0x06:
                 Divide(_registers[0], _registers[1]);
@@ -813,6 +828,19 @@ internal sealed class GbaCpu
                 RunLengthDecompress(number == 0x15);
                 break;
         }
+    }
+
+    private void BeginBiosWait(ushort mask, bool clearPending)
+    {
+        if (mask == 0)
+            mask = 1;
+        if (clearPending)
+            _memory.ClearInterruptFlags(mask);
+        else if ((_memory.PendingInterrupts & mask) != 0)
+            return;
+
+        _biosWaitMask = mask;
+        _biosWaiting = true;
     }
 
     private void Divide(uint numerator, uint denominator)

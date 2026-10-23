@@ -14,6 +14,7 @@ if (args.Length > 0)
 
 Run("ARM instructions store results in work RAM", TestArmExecution);
 Run("BIOS division service returns signed quotient", TestDivideService);
+Run("VBlankIntrWait resumes on the next VBlank", TestVBlankIntrWait);
 Run("VBlank invokes the registered IRQ callback", TestIrqCallback);
 Run("Thumb instructions store results in work RAM", TestThumbExecution);
 Run("Mode 3 renders 15-bit color", TestMode3);
@@ -168,6 +169,25 @@ static void TestIrqCallback()
 
     AssertEqual(1u, memory.Read32(0x03001000), "VBlank callback count");
     AssertEqual((ushort)0, memory.PendingInterrupts, "Acknowledged VBlank interrupt");
+}
+
+static void TestVBlankIntrWait()
+{
+    byte[] rom = CreateRom();
+    Write32(rom, 0, 0xEA000000);
+    Write32(rom, 8, 0xEF000005);
+    Write32(rom, 12, 0xE3A0002A);
+    GbaMemory memory = new(rom);
+    GbaCpu cpu = new(memory);
+
+    cpu.Step();
+    cpu.Step();
+    AssertEqual(0u, cpu.ReadRegister(0), "CPU stays asleep before VBlank");
+
+    memory.Tick(1232 * 160);
+    cpu.Step();
+    cpu.Step();
+    AssertEqual(42u, cpu.ReadRegister(0), "CPU resumes after VBlank");
 }
 
 static void TestThumbExecution()

@@ -172,6 +172,11 @@ internal sealed class GbaMemory
         TickTimers(cycles);
     }
 
+    public void ClearInterruptFlags(ushort mask)
+    {
+        Write16(0x04000202, mask);
+    }
+
     private byte ReadIo8(int offset) => _io[offset];
 
     private void WriteIo8(int offset, byte value)
