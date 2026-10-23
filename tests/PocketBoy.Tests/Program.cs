@@ -39,36 +39,55 @@ static void Run(string name, Action test)
 static void RunRomDiagnostic(string path, int frames, bool pressStart)
 {
     byte[] rom = File.ReadAllBytes(path);
-    var emulator = new GameBoyAdvance(rom);
-    Console.WriteLine($"ROM: {emulator.Title} ({rom.Length:N0} bytes)");
+    var memory = new GbaMemory(rom);
+    var cpu = new GbaCpu(memory);
+    var ppu = new GbaPpu(memory);
+    var trace = new Queue<string>();
+    Console.WriteLine($"ROM: {memory.Title} ({rom.Length:N0} bytes)");
     for (int frame = 1; frame <= frames; frame++)
     {
         if (pressStart && frame == 40)
-            emulator.SetButton(GameBoyButton.Start, true);
+            memory.SetButton(GameBoyButton.Start, true);
         if (pressStart && frame == 80)
-            emulator.SetButton(GameBoyButton.Start, false);
-        emulator.AdvanceFrame();
-        if (frame % 10 != 0 && frame != frames)
-            continue;
-        ReadOnlySpan<byte> pixels = emulator.Ppu.Pixels;
-        var colors = new HashSet<ushort>();
-        int nonzeroPixels = 0;
-        for (int i = 0; i < pixels.Length; i += 2)
+            memory.SetButton(GameBoyButton.Start, false);
+        int cyclesInFrame = 0;
+        while (cyclesInFrame < 280_896)
         {
-            ushort color = (ushort)(pixels[i] | (pixels[i + 1] << 8));
-            colors.Add(color);
-            if (color != 0)
-                nonzeroPixels++;
+            uint address = cpu.ProgramCounter;
+            uint instruction = cpu.ThumbMode ? memory.Read16(address) : memory.Read32(address);
+            int cycles = cpu.Step();
+            memory.Tick(cycles);
+            cyclesInFrame += cycles;
+            trace.Enqueue($"PC={address:X8} {(cpu.ThumbMode ? "T" : "A")} {instruction:X8} "
+                + $"R0-3={cpu.ReadRegister(0):X8}/{cpu.ReadRegister(1):X8}/"
+                + $"{cpu.ReadRegister(2):X8}/{cpu.ReadRegister(3):X8} "
+                + $"R12={cpu.ReadRegister(12):X8} LR={cpu.ReadRegister(14):X8} "
+                + $"SP={cpu.ReadRegister(13):X8}");
+            if (trace.Count > 20)
+                trace.Dequeue();
+            uint pc = cpu.ProgramCounter;
+            bool mapped = pc is >= 0x02000000 and < 0x02040000
+                or >= 0x03000000 and < 0x03008000
+                or >= 0x08000000 and < 0x0E000000;
+            if (!mapped)
+            {
+                Console.WriteLine($"Invalid PC at frame {frame}: 0x{pc:X8}, "
+                    + $"KEYINPUT={memory.Read16(0x04000130):X4}, "
+                    + $"IF/IE={memory.Read16(0x04000202):X4}/{memory.Read16(0x04000200):X4}");
+                foreach (string item in trace)
+                    Console.WriteLine($"  {item}");
+                return;
+            }
         }
-        Console.WriteLine($"Frame {frame}: PC=0x{emulator.ProgramCounter:X8} "
-            + $"mode={(emulator.DisplayControl & 7)} KEYINPUT={emulator.ReadIo16(0x04000130):X4} "
-            + $"colors={colors.Count} nonzero={nonzeroPixels}");
+        ppu.RenderFrame();
+        if (frame % 10 == 0)
+            Console.WriteLine($"Frame {frame}: PC=0x{cpu.ProgramCounter:X8}");
     }
 
     string imagePath = Path.Combine(Path.GetTempPath(), "pocketboy-gba-frame.png");
     using var bitmap = new Bitmap(GbaPpu.Width, GbaPpu.Height, PixelFormat.Format32bppArgb);
     var argb = new int[GbaPpu.Width * GbaPpu.Height];
-    ReadOnlySpan<byte> finalPixels = emulator.Ppu.Pixels;
+    ReadOnlySpan<byte> finalPixels = ppu.Pixels;
     for (int i = 0; i < argb.Length; i++)
     {
         int color = finalPixels[i * 2] | (finalPixels[i * 2 + 1] << 8);

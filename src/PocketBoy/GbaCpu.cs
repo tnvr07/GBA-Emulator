@@ -51,7 +51,7 @@ internal sealed class GbaCpu
         ushort pendingInterrupts = (ushort)(_memory.EnabledInterrupts & _memory.PendingInterrupts);
         if (_memory.InterruptsEnabled && pendingInterrupts != 0 && !_inCallback)
         {
-            EnterInterruptCallback();
+            _memory.ClearInterruptFlags(pendingInterrupts);
             return 4;
         }
 
