@@ -239,36 +239,46 @@ internal sealed class GbaMemory
 
     private void TickTimers(int cycles)
     {
+        int previousOverflowCount = 0;
         for (int timer = 0; timer < 4; timer++)
         {
             int offset = 0x100 + timer * 4;
             ushort control = (ushort)(_io[offset + 2] | (_io[offset + 3] << 8));
             if ((control & 0x80) == 0)
-                continue;
-
-            if ((control & 4) != 0)
             {
-                if (timer > 0)
-                    continue;
+                previousOverflowCount = 0;
                 continue;
             }
 
-            _timerCycles[timer] += cycles;
-            int period = (control & 3) switch { 0 => 1, 1 => 64, 2 => 256, _ => 1024 };
-            while (_timerCycles[timer] >= period)
+            int increments;
+            if (timer > 0 && (control & 4) != 0)
             {
-                _timerCycles[timer] -= period;
+                increments = previousOverflowCount;
+            }
+            else
+            {
+                int period = (control & 3) switch { 0 => 1, 1 => 64, 2 => 256, _ => 1024 };
+                _timerCycles[timer] += cycles;
+                increments = _timerCycles[timer] / period;
+                _timerCycles[timer] %= period;
+            }
+
+            int overflowCount = 0;
+            for (int i = 0; i < increments; i++)
+            {
                 ushort count = (ushort)(_io[offset] | (_io[offset + 1] << 8));
                 count++;
                 if (count == 0)
                 {
                     count = _timerReload[timer];
+                    overflowCount++;
                     if ((control & 0x40) != 0)
                         RequestInterrupt(3 + timer);
                 }
                 _io[offset] = (byte)count;
                 _io[offset + 1] = (byte)(count >> 8);
             }
+            previousOverflowCount = overflowCount;
         }
     }
 

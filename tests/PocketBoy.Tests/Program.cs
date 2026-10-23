@@ -30,6 +30,7 @@ Run("Mode 1 renders an affine background", TestMode1);
 Run("Game Boy Advance button bits are active-low", TestButtons);
 Run("Display timing updates vblank, hblank, and IRQ flags", TestDisplayTiming);
 Run("Game Boy Advance timers reload and raise IRQ flags", TestTimer);
+Run("Cascaded timers increment on overflow and raise IRQ flags", TestCascadedTimer);
 
 static void Run(string name, Action test)
 {
@@ -412,6 +413,19 @@ static void TestTimer()
 
     AssertEqual((ushort)0xFFFE, memory.Read16(0x04000100), "Timer reload");
     AssertEqual(true, (memory.Read16(0x04000202) & 8) != 0, "Timer IRQ");
+}
+
+static void TestCascadedTimer()
+{
+    GbaMemory memory = new(CreateRom());
+    memory.Write16(0x04000100, 0xFFFE);
+    memory.Write16(0x04000102, 0x0080);
+    memory.Write16(0x04000104, 0xFFFF);
+    memory.Write16(0x04000106, 0x00C4);
+    memory.Tick(2);
+
+    AssertEqual((ushort)0xFFFF, memory.Read16(0x04000104), "Cascaded timer reload");
+    AssertEqual(true, (memory.Read16(0x04000202) & 0x10) != 0, "Cascaded timer IRQ");
 }
 
 static byte[] CreateRom()
