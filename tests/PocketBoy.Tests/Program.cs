@@ -17,6 +17,7 @@ if (args.Length > 0)
 }
 
 Run("ARM instructions store results in work RAM", TestArmExecution);
+Run("ARM MRS reads the current status register", TestMrsExecution);
 Run("BIOS division service returns signed quotient", TestDivideService);
 Run("VBlankIntrWait resumes on the next VBlank", TestVBlankIntrWait);
 Run("Halt ignores disabled pending interrupts", TestHaltWait);
@@ -165,6 +166,24 @@ static void TestArmExecution()
         cpu.Step();
 
     AssertEqual(8u, memory.Read32(0x02000000), "ARM result");
+}
+
+static void TestMrsExecution()
+{
+    byte[] rom = CreateRom();
+    Write32(rom, 0, 0xEA000000);
+    Write32(rom, 8, 0xE10F0000);
+    Write32(rom, 12, 0xE59F1004);
+    Write32(rom, 16, 0xE5810000);
+    Write32(rom, 20, 0xEAFFFFFE);
+    Write32(rom, 24, 0x02000000);
+    GbaMemory memory = new(rom);
+    GbaCpu cpu = new(memory);
+
+    for (int i = 0; i < 5; i++)
+        cpu.Step();
+
+    AssertEqual(0x1Fu, memory.Read32(0x02000000), "CPSR result");
 }
 
 static void TestDivideService()

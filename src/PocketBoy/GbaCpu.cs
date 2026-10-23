@@ -94,6 +94,38 @@ internal sealed class GbaCpu
             return false;
         }
 
+        uint psrTransfer = instruction & 0x0FBF0FFF;
+        if (psrTransfer is 0x010F0000 or 0x014F0000)
+        {
+            int destination = (int)((instruction >> 12) & 0xF);
+            _registers[destination] = (instruction & 0x00400000) != 0
+                ? _interruptedStatus
+                : _status;
+            if (destination == 15)
+                AlignProgramCounter();
+            return false;
+        }
+
+        bool immediatePsrValue = (instruction & 0x02000000) != 0;
+        uint psrMask = immediatePsrValue ? 0x0DB0F000u : 0x0DB0FFF0u;
+        uint psrPattern = immediatePsrValue ? 0x0320F000u : 0x0120F000u;
+        if ((instruction & psrMask) == psrPattern)
+        {
+            uint value = immediatePsrValue
+                ? RotateRight(instruction & 0xFF, (int)((instruction >> 8) & 0xF) * 2)
+                : _registers[instruction & 0xF];
+            int fields = (int)((instruction >> 16) & 0xF);
+            uint fieldMask = ((fields & 1) != 0 ? 0x000000FFu : 0)
+                | ((fields & 2) != 0 ? 0x0000FF00u : 0)
+                | ((fields & 4) != 0 ? 0x00FF0000u : 0)
+                | ((fields & 8) != 0 ? 0xFF000000u : 0);
+            if ((instruction & 0x00400000) != 0)
+                _interruptedStatus = (_interruptedStatus & ~fieldMask) | (value & fieldMask);
+            else
+                _status = (_status & ~fieldMask) | (value & fieldMask);
+            return false;
+        }
+
         if ((instruction & 0x0FFFFFF0) == 0x012FFF10)
         {
             uint target = _registers[instruction & 0xF];
