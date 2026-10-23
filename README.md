@@ -29,7 +29,7 @@ Use **Open ROM** to load a ROM file. Controls are:
 | Game Boy | Keyboard |
 | --- | --- |
 | D-pad | Arrow keys (or WASD) |
-| A | Z |
+| A | Z or Space |
 | B | X |
 | Start | Enter |
 | Select | Backspace |

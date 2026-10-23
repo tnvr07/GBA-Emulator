@@ -125,7 +125,7 @@ internal sealed class EmulatorForm : Form
             _cycleBudget = 0;
             _paused = false;
             _clock.Restart();
-            _status.Text = $"{title}  |  Arrows: move   Z: A   X: B   Q/E: L/R   Enter: Start   Backspace: Select   Esc: pause";
+            _status.Text = $"{title}  |  Arrows: move   Z/Space: A   X: B   Q/E: L/R   Enter: Start   Backspace: Select   Esc: pause";
             Text = $"{title} - PocketBoy";
             _screen.Focus();
             _screen.ClearFrame();
@@ -176,7 +176,7 @@ internal sealed class EmulatorForm : Form
         {
             _paused = !_paused;
             string title = _gameBoyAdvance?.Title ?? _gameBoy!.Title;
-            _status.Text = _paused ? "Paused  |  Press Esc to resume" : $"{title}  |  Arrows: move   Z: A   X: B   Q/E: L/R   Enter: Start   Backspace: Select   Esc: pause";
+            _status.Text = _paused ? "Paused  |  Press Esc to resume" : $"{title}  |  Arrows: move   Z/Space: A   X: B   Q/E: L/R   Enter: Start   Backspace: Select   Esc: pause";
             _clock.Restart();
             e.Handled = true;
             e.SuppressKeyPress = true;
@@ -211,7 +211,7 @@ internal sealed class EmulatorForm : Form
             Keys.Left or Keys.A => GameBoyButton.Left,
             Keys.Up or Keys.W => GameBoyButton.Up,
             Keys.Down or Keys.S => GameBoyButton.Down,
-            Keys.Z => GameBoyButton.A,
+            Keys.Z or Keys.Space => GameBoyButton.A,
             Keys.X => GameBoyButton.B,
             Keys.Q => GameBoyButton.L,
             Keys.E => GameBoyButton.R,
