@@ -9,10 +9,12 @@ if (args.Length > 0)
         && Enum.TryParse(args[2], true, out GameBoyButton selectedButton)
         ? selectedButton
         : null;
+    int buttonDownFrame = args.Length > 3 ? int.Parse(args[3]) : 40;
     RunRomDiagnostic(
         args[0],
         args.Length > 1 ? int.Parse(args[1]) : 60,
-        button);
+        button,
+        buttonDownFrame);
     return;
 }
 
@@ -22,7 +24,7 @@ Run("BIOS division service returns signed quotient", TestDivideService);
 Run("VBlankIntrWait resumes on the next VBlank", TestVBlankIntrWait);
 Run("Halt ignores disabled pending interrupts", TestHaltWait);
 Run("VBlank invokes the registered IRQ callback", TestIrqCallback);
-Run("IRQ callbacks return through the BIOS address space", TestIrqCallbackBiosReturn);
+Run("IRQ callback preserves BIOS wait flags", TestIrqCallbackBiosReturn);
 Run("Thumb instructions store results in work RAM", TestThumbExecution);
 Run("Thumb branch-with-link returns to the next instruction", TestThumbBranchAndLink);
 Run("Mode 3 renders 15-bit color", TestMode3);
@@ -42,49 +44,29 @@ static void Run(string name, Action test)
     Console.WriteLine($"PASS {name}");
 }
 
-static void RunRomDiagnostic(string path, int frames, GameBoyButton? button)
+static void RunRomDiagnostic(string path, int frames, GameBoyButton? button, int buttonDownFrame)
 {
     byte[] rom = File.ReadAllBytes(path);
-    var memory = new GbaMemory(rom);
-    var cpu = new GbaCpu(memory);
-    var ppu = new GbaPpu(memory);
-    var trace = new Queue<string>();
-    Console.WriteLine($"ROM: {memory.Title} ({rom.Length:N0} bytes)");
+    var emulator = new GameBoyAdvance(rom);
+    Console.WriteLine($"ROM: {emulator.Title} ({rom.Length:N0} bytes)");
     for (int frame = 1; frame <= frames; frame++)
     {
-        if (button.HasValue && frame == 40)
+        if (button.HasValue && frame == buttonDownFrame)
         {
-            memory.SetButton(button.Value, true);
+            emulator.SetButton(button.Value, true);
             if (button == GameBoyButton.Start)
-                memory.SetButton(GameBoyButton.A, true);
+                emulator.SetButton(GameBoyButton.A, true);
         }
-        if (button.HasValue && frame == 80)
+        if (button.HasValue && frame == buttonDownFrame + 40)
         {
-            memory.SetButton(button.Value, false);
+            emulator.SetButton(button.Value, false);
             if (button == GameBoyButton.Start)
-                memory.SetButton(GameBoyButton.A, false);
+                emulator.SetButton(GameBoyButton.A, false);
         }
-        int frameCycles = 0;
-        while (frameCycles < 280_896)
-        {
-            uint pc = cpu.ProgramCounter;
-            bool thumb = cpu.ThumbMode;
-            uint opcode = thumb ? memory.Read16(pc) : memory.Read32(pc);
-            int cycles = cpu.Step();
-            memory.Tick(cycles);
-            frameCycles += cycles;
-            trace.Enqueue($"PC={pc:X8} {(thumb ? 'T' : 'A')} {opcode:X8} "
-                + $"R0={cpu.ReadRegister(0):X8} R1={cpu.ReadRegister(1):X8} "
-                + $"R2={cpu.ReadRegister(2):X8} R3={cpu.ReadRegister(3):X8} "
-                + $"R12={cpu.ReadRegister(12):X8} CPSR={cpu.Status:X8} "
-                + $"LR={cpu.ReadRegister(14):X8}");
-            if (trace.Count > 24)
-                trace.Dequeue();
-        }
-        ppu.RenderFrame();
+        emulator.AdvanceFrame();
         if (frame % 10 != 0 && frame != frames)
             continue;
-        ReadOnlySpan<byte> pixels = ppu.Pixels;
+        ReadOnlySpan<byte> pixels = emulator.Ppu.Pixels;
         var colors = new HashSet<ushort>();
         int nonzeroPixels = 0;
         for (int i = 0; i < pixels.Length; i += 2)
@@ -94,26 +76,15 @@ static void RunRomDiagnostic(string path, int frames, GameBoyButton? button)
             if (color != 0)
                 nonzeroPixels++;
         }
-        Console.WriteLine($"Frame {frame}: PC=0x{cpu.ProgramCounter:X8} "
-            + $"mode={(memory.DisplayControl & 7)} KEYINPUT={memory.Read16(0x04000130):X4} "
-            + $"BIOSflags={memory.Read32(0x03007FF8):X8} "
-            + $"IE/IF={memory.Read16(0x04000200):X4}/{memory.Read16(0x04000202):X4} "
-            + $"IME={memory.Read16(0x04000208):X4} "
-            + $"IRQHandler={memory.Read32(0x03007FFC):X8} "
+        Console.WriteLine($"Frame {frame}: PC=0x{emulator.ProgramCounter:X8} "
+            + $"mode={(emulator.DisplayControl & 7)} KEYINPUT={emulator.ReadIo16(0x04000130):X4} "
             + $"colors={colors.Count} nonzero={nonzeroPixels}");
-        if (frame == 50)
-        {
-            for (uint address = 0x03003130; address < 0x030031B0; address += 4)
-                Console.WriteLine($"  CODE {address:X8}: {memory.Read32(address):X8}");
-            foreach (string item in trace)
-                Console.WriteLine($"  {item}");
-        }
     }
 
     string imagePath = Path.Combine(Path.GetTempPath(), "pocketboy-gba-frame.png");
     using var bitmap = new Bitmap(GbaPpu.Width, GbaPpu.Height, PixelFormat.Format32bppArgb);
     var argb = new int[GbaPpu.Width * GbaPpu.Height];
-    ReadOnlySpan<byte> finalPixels = ppu.Pixels;
+    ReadOnlySpan<byte> finalPixels = emulator.Ppu.Pixels;
     for (int i = 0; i < argb.Length; i++)
     {
         int color = finalPixels[i * 2] | (finalPixels[i * 2 + 1] << 8);
@@ -221,6 +192,7 @@ static void TestIrqCallback()
 
     AssertEqual(1u, memory.Read32(0x03001000), "VBlank callback count");
     AssertEqual((ushort)0, memory.PendingInterrupts, "Acknowledged VBlank interrupt");
+    AssertEqual(1u, memory.Read32(0x03007FF8), "BIOS wait flag survives IRQ acknowledgement");
 }
 
 static void TestIrqCallbackBiosReturn()
@@ -242,7 +214,8 @@ static void TestIrqCallbackBiosReturn()
     cpu.Step();
 
     AssertEqual(0x08000000u, cpu.ProgramCounter, "IRQ resumes interrupted code");
-    AssertEqual((ushort)0, memory.PendingInterrupts, "BIOS return clears serviced interrupt");
+    AssertEqual((ushort)1, memory.PendingInterrupts, "Unacknowledged interrupt remains pending");
+    AssertEqual(1u, memory.Read32(0x03007FF8), "BIOS wait flag remains pending");
 }
 
 static void TestVBlankIntrWait()
