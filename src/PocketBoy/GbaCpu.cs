@@ -24,6 +24,7 @@ internal sealed class GbaCpu
     private ushort _biosWaitMask;
     public uint ProgramCounter => _registers[15];
     public bool ThumbMode => (_status & 0x20) != 0;
+    public uint Status => _status;
     public uint ReadRegister(int index) => _registers[index];
 
     public GbaCpu(GbaMemory memory)

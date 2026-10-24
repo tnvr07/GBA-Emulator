@@ -76,6 +76,7 @@ static void RunRomDiagnostic(string path, int frames, GameBoyButton? button)
             trace.Enqueue($"PC={pc:X8} {(thumb ? 'T' : 'A')} {opcode:X8} "
                 + $"R0={cpu.ReadRegister(0):X8} R1={cpu.ReadRegister(1):X8} "
                 + $"R2={cpu.ReadRegister(2):X8} R3={cpu.ReadRegister(3):X8} "
+                + $"R12={cpu.ReadRegister(12):X8} CPSR={cpu.Status:X8} "
                 + $"LR={cpu.ReadRegister(14):X8}");
             if (trace.Count > 24)
                 trace.Dequeue();
@@ -102,6 +103,8 @@ static void RunRomDiagnostic(string path, int frames, GameBoyButton? button)
             + $"colors={colors.Count} nonzero={nonzeroPixels}");
         if (frame == 50)
         {
+            for (uint address = 0x03003130; address < 0x030031B0; address += 4)
+                Console.WriteLine($"  CODE {address:X8}: {memory.Read32(address):X8}");
             foreach (string item in trace)
                 Console.WriteLine($"  {item}");
         }
