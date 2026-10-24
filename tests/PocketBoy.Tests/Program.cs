@@ -10,11 +10,13 @@ if (args.Length > 0)
         ? selectedButton
         : null;
     int buttonDownFrame = args.Length > 3 ? int.Parse(args[3]) : 40;
+    int buttonHoldFrames = args.Length > 4 ? int.Parse(args[4]) : 2;
     RunRomDiagnostic(
         args[0],
         args.Length > 1 ? int.Parse(args[1]) : 60,
         button,
-        buttonDownFrame);
+        buttonDownFrame,
+        buttonHoldFrames);
     return;
 }
 
@@ -44,7 +46,12 @@ static void Run(string name, Action test)
     Console.WriteLine($"PASS {name}");
 }
 
-static void RunRomDiagnostic(string path, int frames, GameBoyButton? button, int buttonDownFrame)
+static void RunRomDiagnostic(
+    string path,
+    int frames,
+    GameBoyButton? button,
+    int buttonDownFrame,
+    int buttonHoldFrames)
 {
     byte[] rom = File.ReadAllBytes(path);
     var emulator = new GameBoyAdvance(rom);
@@ -57,7 +64,7 @@ static void RunRomDiagnostic(string path, int frames, GameBoyButton? button, int
             if (button == GameBoyButton.Start)
                 emulator.SetButton(GameBoyButton.A, true);
         }
-        if (button.HasValue && frame == buttonDownFrame + 40)
+        if (button.HasValue && frame == buttonDownFrame + buttonHoldFrames)
         {
             emulator.SetButton(button.Value, false);
             if (button == GameBoyButton.Start)
@@ -214,7 +221,7 @@ static void TestIrqCallbackBiosReturn()
     cpu.Step();
 
     AssertEqual(0x08000000u, cpu.ProgramCounter, "IRQ resumes interrupted code");
-    AssertEqual((ushort)1, memory.PendingInterrupts, "Unacknowledged interrupt remains pending");
+    AssertEqual((ushort)0, memory.PendingInterrupts, "IRQ return acknowledges interrupt");
     AssertEqual(1u, memory.Read32(0x03007FF8), "BIOS wait flag remains pending");
 }
 

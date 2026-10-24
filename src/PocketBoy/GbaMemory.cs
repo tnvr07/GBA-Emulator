@@ -178,10 +178,12 @@ internal sealed class GbaMemory
 
     public void ClearInterruptFlags(ushort mask)
     {
-        Write16(0x04000202, mask);
+        AcknowledgeInterrupts(mask);
         uint waitFlags = Read32(0x03007FF8) & ~(uint)mask;
         Write32(0x03007FF8, waitFlags);
     }
+
+    public void AcknowledgeInterrupts(ushort mask) => Write16(0x04000202, mask);
 
     private byte ReadIo8(int offset) => _io[offset];
 

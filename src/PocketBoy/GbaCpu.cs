@@ -17,6 +17,7 @@ internal sealed class GbaCpu
     private uint _interruptedLr;
     private uint _irqStackPointer = 0x03007FA0;
     private uint _interruptedIrqStackPointer;
+    private ushort _interruptedInterrupts;
     private bool _inCallback;
     private bool _biosWaiting;
     private bool _biosWaitForEnabledInterrupt;
@@ -792,6 +793,7 @@ internal sealed class GbaCpu
         if (handler == 0)
             return;
 
+        _interruptedInterrupts = (ushort)(_memory.EnabledInterrupts & _memory.PendingInterrupts);
         Array.Copy(_registers, _interruptedRegisters, _interruptedRegisters.Length);
         _interruptedStatus = _status;
         _interruptedPc = _registers[15];
@@ -813,6 +815,7 @@ internal sealed class GbaCpu
 
     private void ReturnFromInterruptCallback()
     {
+        _memory.AcknowledgeInterrupts(_interruptedInterrupts);
         _irqStackPointer = _interruptedIrqStackPointer;
         Array.Copy(_interruptedRegisters, _registers, _interruptedRegisters.Length);
         _registers[13] = _interruptedSp;
